@@ -1,1 +1,3 @@
 node_modules
+*.eml
+email/outbox/

@@ -7,7 +7,7 @@
         "convert-data": "node data/convert-excel-to-csv.js",
         "test": "node test/test-workflow.js",
         "start": "node server.js",
-        "dev": "nodemon server.js",
+        "dev": "STREAM_TRANSPORT=true nodemon server.js",
         "setup-db": "node scripts/setup-database.js"
     },
     "dependencies": {

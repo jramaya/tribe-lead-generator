@@ -2,6 +2,7 @@
 require('dotenv').config();
 const express = require('express');
 const path = require('path');
+const fs = require('fs');
 const cors = require('cors');
 const { Pool } = require('pg');
 const cron = require('node-cron');
@@ -1607,6 +1608,7 @@ app.get('/api/leads', async (req, res) => {
             min_score,
             qualified_only,
             source, // NUEVO: filtro por source
+            scraper_run_id,
             sort = 'created_at',
             order = 'desc'
         } = req.query;
@@ -1644,6 +1646,13 @@ app.get('/api/leads', async (req, res) => {
             paramCount++;
             query += ` AND source ILIKE $${paramCount}`;
             params.push(`%${source}%`);
+        }
+        
+        // Scraper Run ID filter
+        if (scraper_run_id) {
+            paramCount++;
+            query += ` AND scraper_run_id = $${paramCount}`;
+            params.push(scraper_run_id);
         }
         
         // Status filter
@@ -3611,6 +3620,25 @@ console.log(htmlBody.substring(htmlBody.length - 200));
 
         const emailResult = await emailSystem.transporter.sendMail(mailOptions);
         console.log(`✅ Email sent to ${lead.email}: ${subject}`);
+
+        if (process.env.STREAM_TRANSPORT === 'true' && emailResult.message) {
+            try {
+                const chunks = [];
+                for await (const chunk of emailResult.message) {
+                    chunks.push(Buffer.from(chunk));
+                }
+                const buffer = Buffer.concat(chunks);
+                const outputDir = path.join(__dirname, 'email', 'outbox');
+                if (!fs.existsSync(outputDir)) {
+                    fs.mkdirSync(outputDir, { recursive: true });
+                }
+                const filePath = path.join(outputDir, `${emailResult.messageId.replace(/[<>]/g, '')}.eml`);
+                fs.writeFileSync(filePath, buffer);
+                console.log(`✅ Email saved to ${filePath}`);
+            } catch (e) {
+                console.error('❌ Error saving .eml file (Manual Send):', e);
+            }
+        }
 
         await createEmailTask(lead.id, sequence_id || 'manual_send', trackingPixelId, template_key);
 
@@ -6179,5 +6207,3 @@ module.exports = {
     PRIORITY_INDUSTRIES,
     TARGET_TITLES
 };
-
-

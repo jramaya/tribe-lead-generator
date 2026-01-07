@@ -2,6 +2,8 @@
 require('dotenv').config();
 const nodemailer = require('nodemailer');
 const { Pool } = require('pg');
+const fs = require('fs');
+const path = require('path');
 
 class SalesHandyEmailSystem {
     constructor() {
@@ -98,13 +100,21 @@ https://calendly.com/tribeariumsolutions/30min`
 
     setupDefaultSMTP() {
         if (process.env.GMAIL_USER && process.env.GMAIL_APP_PASSWORD) {
-            this.defaultTransporter = nodemailer.createTransport({
+            const transportConfig = {
                 service: 'gmail',
                 auth: {
                     user: process.env.GMAIL_USER,
                     pass: process.env.GMAIL_APP_PASSWORD
                 }
-            });
+            };
+
+            if (process.env.STREAM_TRANSPORT === 'true') {
+                transportConfig.streamTransport = true;
+                console.log('🔧 Stream Transport enabled for Default SMTP');
+            }
+
+            this.defaultTransporter = nodemailer.createTransport(transportConfig);
+            this.transporter = this.defaultTransporter;
             console.log('✅ Default Gmail SMTP configured');
         }
     }
@@ -118,17 +128,26 @@ https://calendly.com/tribeariumsolutions/30min`
         
         for (const account of senderEmails) {
             try {
-                const transporter = nodemailer.createTransport({
+                const transportConfig = {
                     service: 'gmail',
                     auth: {
                         user: account.email,
                         pass: account.password
                     }
-                });
+                };
+
+                if (process.env.STREAM_TRANSPORT === 'true') {
+                    transportConfig.streamTransport = true;
+                    console.log(`🔧 Stream Transport enabled for ${account.email}`);
+                }
+
+                const transporter = nodemailer.createTransport(transportConfig);
                 
                 // Verificar que el transporter funciona
-                await transporter.verify();
-                
+                if (process.env.STREAM_TRANSPORT !== 'true') {
+                    await transporter.verify();
+                }
+
                 transporters.push({
                     email: account.email,
                     transporter: transporter,
@@ -358,6 +377,25 @@ https://calendly.com/tribeariumsolutions/30min`
             
             console.log(`✅ Email sent from ${transporterObj.email} to ${prospect.email}`);
             
+            if (process.env.STREAM_TRANSPORT === 'true' && result.message) {
+                try {
+                    const chunks = [];
+                    for await (const chunk of result.message) {
+                        chunks.push(Buffer.from(chunk));
+                    }
+                    const buffer = Buffer.concat(chunks);
+                    const outputDir = path.join(__dirname, 'outbox');
+                    if (!fs.existsSync(outputDir)) {
+                        fs.mkdirSync(outputDir, { recursive: true });
+                    }
+                    const filePath = path.join(outputDir, `${result.messageId.replace(/[<>]/g, '')}.eml`);
+                    fs.writeFileSync(filePath, buffer);
+                    console.log(`✅ Email saved to ${filePath}`);
+                } catch (e) {
+                    console.error('❌ Error saving .eml file:', e);
+                }
+            }
+
             // Actualizar status del prospect
             await this.pool.query(`
                 UPDATE leads 
