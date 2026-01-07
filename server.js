@@ -1520,18 +1520,31 @@ app.post('/api/apollo-scraper', async (req, res) => {
             revenue: req.body.revenue
         };
         
+        // Generar runId único para este lote
+        const runId = `run_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        
         // Responder inmediatamente
         res.json({
             success: true,
             message: 'ScraperCity Direct iniciado - procesando hasta 500 leads',
             status: 'running',
             // Ya no incluimos apolloUrl porque no usamos URLs
-            source: 'scrapercity_direct'
+            source: 'scrapercity_direct',
+            runId: runId // Devolver el runId al frontend
         });
         
         // Procesar en background con más tiempo
         setTimeout(async () => {
             try {
+                // Registrar el inicio del run en la base de datos
+                await pool.query(`
+                    INSERT INTO scraper_runs (
+                        run_id, search_query, leads_count, 
+                        total_cost, cost_per_lead, status
+                    ) VALUES ($1, $2, $3, $4, $5, 'processing')
+                    ON CONFLICT (run_id) DO NOTHING
+                `, [runId, JSON.stringify(searchParams), 0, 0, 0.0039]);
+
                 console.log('🚀 Iniciando ScraperCity Direct...');
                 console.log('📊 Parámetros:', searchParams);
                 
@@ -1554,12 +1567,15 @@ app.post('/api/apollo-scraper', async (req, res) => {
                                         name, email, title, company, phone, website, linkedin_url,
                                         location, industry, company_size, employee_count,
                                         source, score, qualified, seniority_level,
-                                        real_email_verified, email_sequence_status
-                                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+                                        real_email_verified, email_sequence_status,
+                                        scraper_run_id, extraction_date
+                                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, NOW())
                                     ON CONFLICT (email) DO UPDATE SET
                                         name = EXCLUDED.name,
                                         title = EXCLUDED.title,
                                         company = EXCLUDED.company,
+                                        scraper_run_id = EXCLUDED.scraper_run_id,
+                                        extraction_date = NOW(),
                                         updated_at = NOW()
                                 `, [
                                     lead.name, lead.email, lead.title, lead.company,
@@ -1569,7 +1585,8 @@ app.post('/api/apollo-scraper', async (req, res) => {
                                     'scrapercity_direct', // CAMBIO: source actualizado
                                     lead.score || 0, lead.qualified || false,
                                     lead.seniority_level || 'Staff',
-                                    true, 'not_started'
+                                    true, 'not_started',
+                                    runId // $18: scraper_run_id
                                 ]);
                                 savedCount++;
                             } catch (dbError) {
@@ -1580,9 +1597,21 @@ app.post('/api/apollo-scraper', async (req, res) => {
                         console.log(`💾 Guardados ${savedCount}/${results.leads.length} leads...`);
                     }
                     
+                    // Actualizar el estado del run a completado
+                    await pool.query(`
+                        UPDATE scraper_runs 
+                        SET leads_count = $1, total_cost = $2, status = 'completed', completed_at = NOW()
+                        WHERE run_id = $3
+                    `, [savedCount, savedCount * 0.0039, runId]);
+
                     console.log(`✅ COMPLETADO: ${savedCount} leads guardados en la base de datos`);
                 } else {
                     console.log('⚠️ ScraperCity no devolvió resultados válidos');
+                    
+                    // Marcar como fallido o completado con 0 leads
+                    await pool.query(`
+                        UPDATE scraper_runs SET status = 'failed', completed_at = NOW() WHERE run_id = $1
+                    `, [runId]);
                 }
                 
             } catch (error) {
