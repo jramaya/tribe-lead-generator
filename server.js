@@ -3631,6 +3631,7 @@ const htmlBody = `
                 <div style="background: lightblue; padding: 5px; margin-top: 10px; font-size: 10px;">
                     DEBUG: Tracking pixel URL: ${trackingPixelUrl}
                 </div>
+                <img src="${trackingPixelUrl}"/>
             </div>
         `;
 
