@@ -2346,7 +2346,7 @@
   function startPollingForResults() {
       console.log('⏳ Iniciando polling para resultados...');
       pollAttempts = 0;
-      const maxAttempts = 1024; // 10 minutos máximo (60 * 10 segundos)
+      const maxAttempts = 2048; // 10 minutos máximo (60 * 10 segundos)
       
       // Mostrar contador de progreso
       document.getElementById('progressCounter').classList.remove('hidden');
